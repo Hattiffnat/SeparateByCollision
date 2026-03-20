@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 id = "separate_by_collision"
 name = "Separate by Collision"
-version = "0.1.0"
+version = "1.0.1"
 tagline = "Separate mesh by loose parts. Parts are grouped if they collide"
 maintainer = "Hattiffnat"
 type = "add-on"
