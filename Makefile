@@ -6,8 +6,6 @@ RELEASE_FOLDER=extension_release
 RELEASE_PATH=$(RELEASE_FOLDER)/$(ADDON_ID)
 
 TEST_FILE=blend/bench.blend
-# TEST_FILE=blend/wrinkle_test.blend
-# TEST_FILE=blend/empty_file.blend
 
 build-extension-archive:
 	rm -rf $(RELEASE_PATH)
