@@ -1,0 +1,26 @@
+name: Release
+env:
+  ARCHIVE_NAME: separate_by_collision
+
+on:
+  release:
+    types: [prereleased]
+
+jobs:
+  build-and-upload-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create archive
+        run: |
+          make build-extension-archive
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./extension_release/${{ env.ARCHIVE_NAME }}_extension.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

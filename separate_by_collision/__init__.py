@@ -1,17 +1,24 @@
 import time
 from collections import defaultdict
-from itertools import chain, combinations, product
+from itertools import chain, combinations, permutations, product
 from math import inf
-from typing import FrozenSet, Iterable, List, Optional, Self, Set, Tuple, Union
+from typing import FrozenSet, Iterable, List, Optional, Self, Set, Tuple, Union, overload, override
 
+import blf
 import bmesh
 import bpy
+import gpu
+from bmesh.types import BMesh
 from bpy.props import EnumProperty, FloatProperty
-from bpy.types import MeshEdge, MeshLoopTriangle, MeshPolygon
+from bpy.types import Context, Event, Menu, Mesh, MeshEdge, MeshLoopTriangle, MeshPolygon
+from bpy_extras import view3d_utils
+from gpu_extras.presets import draw_circle_2d
 from mathutils import Vector
 from mathutils.geometry import (
     closest_point_on_tri,
+    intersect_line_plane,
     intersect_point_line_segment,
+    intersect_ray_tri,
 )
 
 
@@ -21,8 +28,8 @@ class AABB:
     def __init__(self, points: Iterable[Vector], radius):
         points = tuple(points)
 
-        self.min = Vector()
-        self.max = Vector()
+        self.min: Vector = Vector()
+        self.max: Vector = Vector()
         for axis in range(3):
             self.min[axis] = min(p[axis] for p in points) - radius
             self.max[axis] = max(p[axis] for p in points) + radius
@@ -39,12 +46,12 @@ class AABB:
             if m == self.dimensions[axis]:
                 return axis
 
-    def intersects(self, other):
+    def intersects(self, other: Self) -> bool:
         return all(self.max[axis] >= other.min[axis] for axis in range(3)) and all(
             other.max[axis] >= self.min[axis] for axis in range(3)
         )
 
-    def visualize(self, bm):
+    def visualize(self, bm: BMesh):
         verts = list(product(*zip(self.min, self.max)))
 
         for i, v1_co in enumerate(verts):
@@ -186,7 +193,7 @@ class BVHNode:
             self._right.visualize(bm)
 
 
-def line_line_distance_squared(a0: Vector, a1: Vector, b0: Vector, b1: Vector):
+def line_line_distance_squared(a0: Vector, a1: Vector, b0: Vector, b1: Vector) -> float:
     EPS = 0.000000001
 
     d1 = a1 - a0
@@ -247,7 +254,7 @@ def leafs(node) -> Iterable[BVHNode]:
         stack.append(current.left())
 
 
-def bvh_aabb_query(node, aabb, radius) -> Iterable[BVHNode]:
+def bvh_aabb_query(node: BVHNode, aabb: AABB) -> Iterable[BVHNode]:
     stack = [node]
 
     while stack:
@@ -265,7 +272,7 @@ def bvh_aabb_query(node, aabb, radius) -> Iterable[BVHNode]:
         stack.append(right)
 
 
-def bvh_overlap(bvh_1: BVHNode, bvh_2: BVHNode, radius) -> Iterable[Tuple[BVHNode, BVHNode]]:
+def bvh_overlap(bvh_1: BVHNode, bvh_2: BVHNode) -> Iterable[Tuple[BVHNode, BVHNode]]:
     stack = [(bvh_1, bvh_2)]
     while stack:
         node_1, node_2 = stack.pop()
@@ -296,9 +303,14 @@ def bvh_overlap(bvh_1: BVHNode, bvh_2: BVHNode, radius) -> Iterable[Tuple[BVHNod
             stack.append((right_1, right_2))
 
 
-def island_vs_island(mesh, isl_1, isl_2, radius, island_edges_bvh, island_tris_bvh) -> bool:
-    # print(isl_1, "VS", isl_2)
-
+def island_vs_island(
+    mesh: Mesh,
+    isl_1: Island,
+    isl_2: Island,
+    radius: float,
+    island_edges_bvh: dict[Island, BVHNode],
+    island_tris_bvh: dict[Island, BVHNode],
+) -> bool:
     def get_edges_bvh(isl):
         if isl not in island_edges_bvh:
             island_edges_bvh[isl] = BVHNode([MeshElement(e) for e in isl.edges], radius)
@@ -328,16 +340,14 @@ def island_vs_island(mesh, isl_1, isl_2, radius, island_edges_bvh, island_tris_b
 
         # VERT VS TRIS
         if isl_2.tris:
-            #            print("DEBUG", "vert vs tris")
-            for node_2 in bvh_aabb_query(get_tris_bvh(isl_2), isl_1.aabb(), 0.0):
+            for node_2 in bvh_aabb_query(get_tris_bvh(isl_2), isl_1.aabb()):
                 for el in node_2.elements:
                     closest = closest_point_on_tri(vert.co, *(mesh.vertices[v_i].co for v_i in el.element.vertices))
                     if (vert.co - closest).length_squared <= diameter_squared:
                         return True
 
         # VERT VS EDGES
-        for node_2 in bvh_aabb_query(get_edges_bvh(isl_2), isl_1.aabb(), 0.0):
-            #            print("DEBUG", "vert vs edges")
+        for node_2 in bvh_aabb_query(get_edges_bvh(isl_2), isl_1.aabb()):
             for el in node_2.elements:
                 e = el.element
                 e_v_1, e_v_2 = (
@@ -353,7 +363,7 @@ def island_vs_island(mesh, isl_1, isl_2, radius, island_edges_bvh, island_tris_b
         return False
 
     # EDGE VS EDGE
-    for node_1, node_2 in bvh_overlap(get_edges_bvh(isl_1), get_edges_bvh(isl_2), 0.0):
+    for node_1, node_2 in bvh_overlap(get_edges_bvh(isl_1), get_edges_bvh(isl_2)):
         for el_1, el_2 in product(node_1.elements, node_2.elements):
             v1_i, v2_i = el_1.element.vertices
             v3_i, v4_i = el_2.element.vertices
@@ -361,11 +371,7 @@ def island_vs_island(mesh, isl_1, isl_2, radius, island_edges_bvh, island_tris_b
             v1, v2 = mesh.vertices[v1_i], mesh.vertices[v2_i]
             v3, v4 = mesh.vertices[v3_i], mesh.vertices[v4_i]
 
-            #            print("DEBUG", "edge vs edge")
-            #            print(("{} " * 4).format(v1.co, v2.co, v3.co, v4.co))
-
             ds = line_line_distance_squared(v1.co, v2.co, v3.co, v4.co)
-            #            print("distance squared:", ds, "distance:", ds ** 0.5)
             if ds <= diameter_squared:
                 return True
 
@@ -373,20 +379,28 @@ def island_vs_island(mesh, isl_1, isl_2, radius, island_edges_bvh, island_tris_b
     if len(isl_1.tris) == 0 or len(isl_2.tris) == 0:
         return False
 
-    for node_1, node_2 in bvh_overlap(get_tris_bvh(isl_1), get_tris_bvh(isl_2), 0.0):
+    for node_1, node_2 in bvh_overlap(get_tris_bvh(isl_1), get_tris_bvh(isl_2)):
         for el_1, el_2 in product(node_1.elements, node_2.elements):
-            t_1, t_2 = el_1.element, el_2.element
+            for t_1, t_2 in permutations((el_1.element, el_2.element)):
+                # Intersection test
+                t_co = [mesh.vertices[v2_i].co for v2_i in t_2.vertices]
+                for e in combinations(t_1.vertices, 2):
+                    e_co: list[Vector] = [mesh.vertices[v1_i].co for v1_i in e]
+                    normal = e_co[0] - e_co[1]
+                    point: Vector = intersect_ray_tri(*t_co, normal.normalized(), e_co[1])
+                    if point is not None:
+                        normal_length_sq = normal.length_squared
+                        if (e_co[1] - point).length_squared <= normal_length_sq:
+                            return True
 
-            #            print("DEBUG", "tri vs tri")
-            #            pp((t_1, t_2))
+                # Closest point test
+                for v1_i in t_1.vertices:
+                    v1 = mesh.vertices[v1_i]
+                    t_co = (mesh.vertices[v2_i].co for v2_i in t_2.vertices)
 
-            for v1_i, t in chain(product(t_1.vertices, [t_2]), product(t_2.vertices, [t_1])):
-                v1 = mesh.vertices[v1_i]
-                t_co = (mesh.vertices[v2_i].co for v2_i in t.vertices)
-
-                closest = closest_point_on_tri(v1.co, *t_co)
-                if (v1.co - closest).length_squared <= diameter_squared:
-                    return True
+                    dist_sq = (v1.co - closest_point_on_tri(v1.co, *t_co)).length_squared
+                    if dist_sq <= diameter_squared:
+                        return True
 
     return False
 
@@ -397,8 +411,12 @@ class SeparateByCollisionOperator(bpy.types.Operator):
     bl_idname = 'mesh.separate_by_collision'
     bl_label = 'Separate by Collision'
 
-    radius: FloatProperty(min=0.0, max=inf, default=0.0, description='Collision detection radius')
-
+    radius: FloatProperty(
+        min=0.0,
+        max=inf,
+        default=0.0,
+        description='Collision detection radius',
+    )
     mode: EnumProperty(
         items=(
             ('SURFACE', 'Surface', '⚠️ Can be slow on large meshes'),
@@ -409,13 +427,72 @@ class SeparateByCollisionOperator(bpy.types.Operator):
     )
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         return context.mode == 'OBJECT'
 
-    def execute(self, context):
+    def invoke(self, context: Context, event: Event) -> set[str]:
+        r3d = context.space_data.region_3d
+
+        def circle_draw():
+            gpu.matrix.multiply_matrix(r3d.view_rotation.to_matrix().to_4x4())
+            draw_circle_2d(bpy.context.scene.cursor.location, [1.0, 0.5, 0.5, 1.0], self.radius, segments=64)
+
+        def text_draw():
+            blf.position(0, context.region.width / 2, 100, 0)
+            blf.size(0, 10.0)
+            blf.draw(0, f'radius {self.radius:.5}')
+
+        self.circle_draw_handler = bpy.types.SpaceView3D.draw_handler_add(circle_draw, (), 'WINDOW', 'POST_VIEW')
+        self.text_draw_handler = bpy.types.SpaceView3D.draw_handler_add(text_draw, (), 'WINDOW', 'POST_PIXEL')
+        context.area.tag_redraw()
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def _remove_handlers(self):
+        bpy.types.SpaceView3D.draw_handler_remove(self.circle_draw_handler, 'WINDOW')
+        bpy.types.SpaceView3D.draw_handler_remove(self.text_draw_handler, 'WINDOW')
+
+    @staticmethod
+    def _get_radius(region, rv3d, cursor_co, mouse_co) -> float:
+        ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, mouse_co)
+        ray_dir = view3d_utils.region_2d_to_vector_3d(region, rv3d, mouse_co)
+
+        plane_normal = rv3d.view_rotation @ Vector((0.0, 0.0, -1.0))
+
+        hit = intersect_line_plane(ray_origin, ray_origin + ray_dir, cursor_co, plane_normal)
+
+        if hit is None:
+            return 0.0
+
+        return (cursor_co - hit).length
+
+    def modal(self, context: Context, event: Event) -> set[str]:
+        match event.type:
+            case 'MOUSEMOVE':
+                self.radius = self._get_radius(
+                    context.region,
+                    context.region_data,
+                    context.scene.cursor.location,
+                    (event.mouse_region_x, event.mouse_region_y),
+                )
+            case 'LEFTMOUSE':
+                self._remove_handlers()
+                context.area.tag_redraw()
+                return self.execute(context)
+            case 'RIGHTMOUSE' | 'ESC':
+                self._remove_handlers()
+                context.area.tag_redraw()
+                return {'CANCELLED'}
+            case _:
+                pass
+
+        context.area.tag_redraw()
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context: Context) -> set[str]:
         start = time.perf_counter()
 
-        print(f'radius: {self.radius:.5}\tmode {self.mode}')
+        print(f'radius: {self.radius:.5}\tmode: {self.mode}')
 
         for obj in context.selected_objects:
             print(obj.name)
@@ -447,8 +524,8 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
             else:
                 for node_1 in leafs(islands_bvh):
-                    #                    print("DEBUG", "node_1.aabb.dimensions:", node_1.aabb.dimensions)
-                    for node_2 in bvh_aabb_query(islands_bvh, node_1.aabb, 0.0):
+                    # print("DEBUG", "node_1.aabb.dimensions:", node_1.aabb.dimensions)
+                    for node_2 in bvh_aabb_query(islands_bvh, node_1.aabb):
                         if node_1 == node_2:
                             continue
 
@@ -465,17 +542,17 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             print('broad phase collisions:', len(broad_collisions))
 
             #######
-            #            bvh_bm = bmesh.new()
-            #
-            #            islands_bvh.visualize(bvh_bm)
-            #
-            #            bvh_mesh = bpy.data.meshes.new("bvh_tree")
-            #            bvh_bm.to_mesh(bvh_mesh)
-            #
-            #            bvh_obj = bpy.data.objects.new("bvh_tree", bvh_mesh)
-            #            bvh_obj.matrix_local = obj.matrix_local
-            #            context.collection.objects.link(bvh_obj)
-            #            return
+            # bvh_bm = bmesh.new()
+
+            # islands_bvh.visualize(bvh_bm)
+
+            # bvh_mesh = bpy.data.meshes.new("bvh_tree")
+            # bvh_bm.to_mesh(bvh_mesh)
+
+            # bvh_obj = bpy.data.objects.new("bvh_tree", bvh_mesh)
+            # bvh_obj.matrix_local = obj.matrix_local
+            # context.collection.objects.link(bvh_obj)
+            # return
             #######
 
             if self.mode == 'BB':
@@ -512,10 +589,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             if len(groups) < 2:
                 continue
 
-            # TODO:
             # Unfortunately, bmesh.ops.separate and bmesh.ops.duplicate currently cannot
-            # extract elements to another bmesh. However, this separation method is
+            # extract elements to another bmesh. However, separation method below is
             # guaranteed to preserve all attributes, vertex color, vertex groups, etc.
+            # TODO: come up with something faster
 
             bm = bmesh.new()
             bm.from_mesh(obj.data)
@@ -541,7 +618,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 group_bm.free()
 
                 context.collection.objects.link(group_obj)
-                print('object', group_obj.name, 'created')
 
             bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.index in verts_to_delete])
             bm.to_mesh(obj.data)
@@ -554,12 +630,26 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 # UI
 
 
+class SeparateByCollisionMenu(Menu):
+    bl_idname = 'OBJECT_MT_separate_by_collision'
+    bl_label = 'Separate by Collision'
+
+    def draw(self, context: Context):
+        layout = self.layout
+
+        layout.operator(SeparateByCollisionOperator.bl_idname, text='Surface Mode').mode = 'SURFACE'
+        layout.operator(SeparateByCollisionOperator.bl_idname, text='Bounding Box Mode').mode = 'BB'
+
+
 def separate_by_collision_menu(self, context):
-    self.layout.operator(SeparateByCollisionOperator.bl_idname)
+    self.layout.menu(SeparateByCollisionMenu.bl_idname)
     self.layout.separator()
 
 
-classes = (SeparateByCollisionOperator,)
+classes = (
+    SeparateByCollisionOperator,
+    SeparateByCollisionMenu,
+)
 
 
 def register():
@@ -578,10 +668,3 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
         print(cls.__name__, 'unregistred')
-
-
-if __name__ == '__main__':
-    bpy.utils.register_class(SeparateByCollisionOperator)
-
-    # bpy.ops.mesh.separate_by_collision(radius=0.3, mode="BB")
-    bpy.ops.mesh.separate_by_collision(radius=0.3, mode='SURFACE')
