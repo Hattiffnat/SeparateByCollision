@@ -47,8 +47,10 @@ class AABB:
                 return axis
 
     def intersects(self, other: Self) -> bool:
-        return all(self.max[axis] >= other.min[axis] for axis in range(3)) and all(
-            other.max[axis] >= self.min[axis] for axis in range(3)
+        return (
+            True
+            and all(self.max[axis] >= other.min[axis] for axis in range(3))
+            and all(other.max[axis] >= self.min[axis] for axis in range(3))
         )
 
     def visualize(self, bm: BMesh):
