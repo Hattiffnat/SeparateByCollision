@@ -114,7 +114,7 @@ class UnionFindManager(Generic[T]):
             if self.rank[ra] == self.rank[rb]:
                 self.rank[ra] += 1
 
-    def groups(self) -> defaultdict[T, list[T]]:
+    def groups(self) -> dict[T, list[T]]:
         groups = defaultdict(list)
 
         for k in self.parent:
