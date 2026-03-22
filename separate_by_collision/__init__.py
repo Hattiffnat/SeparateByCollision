@@ -533,7 +533,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
             else:
                 for node_1 in leafs(islands_bvh):
-                    # print("DEBUG", "node_1.aabb.dimensions:", node_1.aabb.dimensions)
                     for node_2 in bvh_aabb_query(islands_bvh, node_1.aabb):
                         if node_1 == node_2:
                             continue
