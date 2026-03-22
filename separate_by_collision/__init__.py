@@ -23,7 +23,7 @@ from mathutils.geometry import (
 
 @final
 class AABB:
-    __slots__ = ('min', 'max', 'dimensions')
+    __slots__ = ("min", "max", "dimensions")
 
     def __init__(self, points: Iterable[Vector], radius):
         points = tuple(points)
@@ -38,7 +38,7 @@ class AABB:
 
     @override
     def __str__(self):
-        return f'AABB(min {self.min}, max {self.max})'
+        return f"AABB(min {self.min}, max {self.max})"
 
     def longest_axis(self):
         m = max(self.dimensions)
@@ -65,7 +65,7 @@ class AABB:
 
 
 class Island:
-    __slots__ = ('id_data', 'vertices', 'edges', 'faces', 'tris', '_aabb', 'radius')
+    __slots__ = ("id_data", "vertices", "edges", "faces", "tris", "_aabb", "radius")
 
     def __init__(self, mesh, radius):
         self.id_data = mesh
@@ -79,7 +79,7 @@ class Island:
         self._aabb = None
 
     def __str__(self):
-        return f'Island( v {len(self.vertices)} | e {len(self.edges)} | f {len(self.faces)} )'
+        return f"Island( v {len(self.vertices)} | e {len(self.edges)} | f {len(self.faces)} )"
 
     def aabb(self):
         if self._aabb is None:
@@ -88,7 +88,7 @@ class Island:
         return self._aabb
 
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 @final
@@ -127,7 +127,7 @@ class UnionFindManager[T]:
 
 @final
 class MeshElement:
-    __slots__ = ('element', 'aabb', 'centroid')
+    __slots__ = ("element", "aabb", "centroid")
 
     def __init__(self, element: MeshEdge | MeshLoopTriangle | MeshPolygon | Island):
         self.element = element
@@ -136,7 +136,7 @@ class MeshElement:
 
     @override
     def __str__(self):
-        return f'MeshElement(el = {self.element})'
+        return f"MeshElement(el = {self.element})"
 
 
 @final
@@ -146,7 +146,7 @@ class BVHNode:
     I couldn't get mathutils.bvhtree to work properly with edges and radius.
     """
 
-    __slots__ = ('_left', '_right', 'elements', 'aabb', 'radius', 'depth')
+    __slots__ = ("_left", "_right", "elements", "aabb", "radius", "depth")
 
     MAX_LEAF_SIZE = 1
     MAX_DEPTH = 24
@@ -164,8 +164,8 @@ class BVHNode:
     @override
     def __str__(self):
         if self.elements is not None:
-            return 'BVHNode( ' + '|'.join(map(str, self.elements)) + ' )'
-        return 'BVHNode()'
+            return "BVHNode( " + "|".join(map(str, self.elements)) + " )"
+        return "BVHNode()"
 
     def _split(self):
         if not self._is_splitable():
@@ -415,28 +415,28 @@ def island_vs_island(
 class SeparateByCollisionOperator(bpy.types.Operator):
     """Separate mesh by loose parts. Parts will be grouped if they collide"""
 
-    bl_idname = 'mesh.separate_by_collision'
-    bl_label = 'Separate by Collision'
+    bl_idname = "mesh.separate_by_collision"
+    bl_label = "Separate by Collision"
 
     radius: FloatProperty(
         min=0.0,
         max=inf,
         default=0.0,
-        description='Collision detection radius',
+        description="Collision detection radius",
     )
     mode: EnumProperty(
         items=(
-            ('SURFACE', 'Surface', '⚠️ Can be slow on large meshes'),
-            ('BB', 'Bounding Box', 'Fast'),
+            ("SURFACE", "Surface", "⚠️ Can be slow on large meshes"),
+            ("BB", "Bounding Box", "Fast"),
         ),
         default=0,
-        description='Collision type',
+        description="Collision type",
     )
 
     @classmethod
     @override
     def poll(cls, context: Context):
-        return context.mode == 'OBJECT'
+        return context.mode == "OBJECT"
 
     @override
     def invoke(self, context: Context, event: Event) -> set[str]:
@@ -455,17 +455,17 @@ class SeparateByCollisionOperator(bpy.types.Operator):
         def text_draw():
             blf.position(0, context.region.width / 2, 50, 0)
             blf.size(0, 14.0)
-            blf.draw(0, f'radius {self.radius:.5}')
+            blf.draw(0, f"radius {self.radius:.5}")
 
-        self.circle_draw_handler = bpy.types.SpaceView3D.draw_handler_add(circle_draw, (), 'WINDOW', 'POST_PIXEL')
-        self.text_draw_handler = bpy.types.SpaceView3D.draw_handler_add(text_draw, (), 'WINDOW', 'POST_PIXEL')
+        self.circle_draw_handler = bpy.types.SpaceView3D.draw_handler_add(circle_draw, (), "WINDOW", "POST_PIXEL")
+        self.text_draw_handler = bpy.types.SpaceView3D.draw_handler_add(text_draw, (), "WINDOW", "POST_PIXEL")
         context.area.tag_redraw()
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
     def _remove_handlers(self):
-        bpy.types.SpaceView3D.draw_handler_remove(self.circle_draw_handler, 'WINDOW')
-        bpy.types.SpaceView3D.draw_handler_remove(self.text_draw_handler, 'WINDOW')
+        bpy.types.SpaceView3D.draw_handler_remove(self.circle_draw_handler, "WINDOW")
+        bpy.types.SpaceView3D.draw_handler_remove(self.text_draw_handler, "WINDOW")
 
     @staticmethod
     def _get_radius(region, rv3d, cursor_co, mouse_co) -> float:
@@ -475,7 +475,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
     @override
     def modal(self, context: Context, event: Event) -> set[str]:
         match event.type:
-            case 'MOUSEMOVE':
+            case "MOUSEMOVE":
                 self._mouse_co[0], self._mouse_co[1] = event.mouse_region_x, event.mouse_region_y
                 self.radius = self._get_radius(
                     context.region,
@@ -483,29 +483,29 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                     context.scene.cursor.location,
                     self._mouse_co,
                 )
-            case 'LEFTMOUSE':
+            case "LEFTMOUSE":
                 self._remove_handlers()
                 context.area.tag_redraw()
                 return self.execute(context)
-            case 'RIGHTMOUSE' | 'ESC':
+            case "RIGHTMOUSE" | "ESC":
                 self._remove_handlers()
                 context.area.tag_redraw()
-                return {'CANCELLED'}
+                return {"CANCELLED"}
             case _:
                 pass
 
         context.area.tag_redraw()
-        return {'RUNNING_MODAL'}
+        return {"RUNNING_MODAL"}
 
     @override
     def execute(self, context: Context) -> set[str]:
         start = time.perf_counter()
 
-        print(f'radius: {self.radius:.5}\tmode: {self.mode}')
+        print(f"radius: {self.radius:.5}\tmode: {self.mode}")
 
         for obj in context.selected_objects:
             print(obj.name)
-            if obj.type != 'MESH':
+            if obj.type != "MESH":
                 continue
 
             verts_union_find = UnionFindManager(range(len(obj.data.vertices)))
@@ -519,10 +519,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 islands[r_i] = Island(obj.data, self.radius)
                 islands[r_i].vertices.extend(verts_indices)
 
-            print('islands:', len(islands))
+            print("islands:", len(islands))
 
             # BROAD PHASE
-            print('# BROAD PHASE')
+            print("# BROAD PHASE")
 
             islands_bvh = BVHNode([MeshElement(isl) for isl in islands.values()], self.radius)
 
@@ -548,7 +548,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                             )
                         )
 
-            print('broad phase collisions:', len(broad_collisions))
+            print("broad phase collisions:", len(broad_collisions))
 
             #######
             # bvh_bm = bmesh.new()
@@ -564,7 +564,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             # return
             #######
 
-            if self.mode == 'BB':
+            if self.mode == "BB":
                 collisions = broad_collisions
                 collisions_union_find = UnionFindManager(islands.values())
 
@@ -572,7 +572,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                     collisions_union_find.union(isl_1, isl_2)
             else:
                 # NARROW PHASE
-                print('# NARROW PHASE')
+                print("# NARROW PHASE")
 
                 for e in obj.data.edges:
                     r = verts_union_find.find(e.vertices[0])
@@ -595,10 +595,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                         collisions_union_find.union(isl_1, isl_2)
                         collisions.add(frozenset((isl_1, isl_2)))
 
-                print('narrow phase collisions:', len(collisions))
+                print("narrow phase collisions:", len(collisions))
 
             groups = collisions_union_find.groups()
-            print('collision groups:', len(groups))
+            print("collision groups:", len(groups))
 
             if len(groups) < 2:
                 continue
@@ -637,8 +637,8 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             bm.to_mesh(obj.data)
             bm.free()
 
-        print(f'finished in: {time.perf_counter() - start:.4} sec')
-        return {'FINISHED'}
+        print(f"finished in: {time.perf_counter() - start:.4} sec")
+        return {"FINISHED"}
 
 
 # UI
@@ -646,15 +646,15 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
 @final
 class SeparateByCollisionMenu(Menu):
-    bl_idname = 'OBJECT_MT_separate_by_collision'
-    bl_label = 'Separate by Collision'
+    bl_idname = "OBJECT_MT_separate_by_collision"
+    bl_label = "Separate by Collision"
 
     @override
     def draw(self, context: Context):
         layout = self.layout
 
-        layout.operator(SeparateByCollisionOperator.bl_idname, text='Surface Mode').mode = 'SURFACE'
-        layout.operator(SeparateByCollisionOperator.bl_idname, text='Bounding Box Mode').mode = 'BB'
+        layout.operator(SeparateByCollisionOperator.bl_idname, text="Surface Mode").mode = "SURFACE"
+        layout.operator(SeparateByCollisionOperator.bl_idname, text="Bounding Box Mode").mode = "BB"
 
 
 def separate_by_collision_menu(self, _):
@@ -683,4 +683,4 @@ def unregister():
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
-        print(cls.__name__, 'unregistred')
+        print(cls.__name__, "unregistred")
