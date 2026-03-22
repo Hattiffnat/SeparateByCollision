@@ -3,7 +3,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from itertools import chain, combinations, permutations, product
 from math import inf
-from typing import Self, TypeVar, final, override
+from typing import Generic, Self, TypeVar, final
 
 import blf
 import bmesh
@@ -16,7 +16,7 @@ from gpu_extras.presets import draw_circle_2d
 from mathutils import Vector
 from mathutils.geometry import (
     closest_point_on_tri,
-    intersect_point_line_segment,
+    intersect_point_line,
     intersect_ray_tri,
 )
 
@@ -36,7 +36,6 @@ class AABB:
 
         self.dimensions = self.max - self.min
 
-    @override
     def __str__(self):
         return f"AABB(min {self.min}, max {self.max})"
 
@@ -92,7 +91,7 @@ T = TypeVar("T")
 
 
 @final
-class UnionFindManager[T]:
+class UnionFindManager(Generic[T]):
     def __init__(self, values: Iterable[T]):
         self.parent = {v: v for v in values}
         self.rank = {v: 0 for v in values}
@@ -134,7 +133,6 @@ class MeshElement:
         self.aabb = AABB((element.id_data.vertices[v].co for v in self.element.vertices), 0.0)
         self.centroid = (self.aabb.min + self.aabb.max) * 0.5
 
-    @override
     def __str__(self):
         return f"MeshElement(el = {self.element})"
 
@@ -161,7 +159,6 @@ class BVHNode:
 
         self.aabb = AABB(chain(*((el.aabb.min, el.aabb.max) for el in elements)), radius)
 
-    @override
     def __str__(self):
         if self.elements is not None:
             return "BVHNode( " + "|".join(map(str, self.elements)) + " )"
@@ -361,9 +358,16 @@ def island_vs_island(
                     mesh.vertices[e.vertices[0]],
                 )
 
-                _, distance = intersect_point_line_segment(vert.co, e_v_1.co, e_v_2.co)
+                closest, factor = intersect_point_line(vert.co, e_v_1.co, e_v_2.co)
 
-                if distance <= diameter:
+                if factor < 0.0:
+                    dist_sq = (e_v_1.co - vert.co).length_squared
+                elif factor > 1.0:
+                    dist_sq = (e_v_2.co - vert.co).length_squared
+                else:
+                    dist_sq = (closest - vert.co).length_squared
+
+                if dist_sq <= diameter_squared:
                     return True
 
         return False
@@ -434,11 +438,9 @@ class SeparateByCollisionOperator(bpy.types.Operator):
     )
 
     @classmethod
-    @override
     def poll(cls, context: Context):
         return context.mode == "OBJECT"
 
-    @override
     def invoke(self, context: Context, event: Event) -> set[str]:
         self._mouse_co = [0.0, 0.0]
         r3d = context.space_data.region_3d
@@ -472,7 +474,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
         loc = view3d_utils.region_2d_to_location_3d(region, rv3d, mouse_co, cursor_co)
         return (cursor_co - loc).length
 
-    @override
     def modal(self, context: Context, event: Event) -> set[str]:
         match event.type:
             case "MOUSEMOVE":
@@ -497,7 +498,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
         context.area.tag_redraw()
         return {"RUNNING_MODAL"}
 
-    @override
     def execute(self, context: Context) -> set[str]:
         start = time.perf_counter()
 
@@ -649,7 +649,6 @@ class SeparateByCollisionMenu(Menu):
     bl_idname = "OBJECT_MT_separate_by_collision"
     bl_label = "Separate by Collision"
 
-    @override
     def draw(self, context: Context):
         layout = self.layout
 

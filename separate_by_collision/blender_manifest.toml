@@ -6,6 +6,6 @@ tagline = "Separate mesh by loose parts. Parts are grouped if they collide"
 maintainer = "Hattiffnat"
 type = "add-on"
 tags = ["Mesh"]
-blender_version_min = "5.0.0"
+blender_version_min = "4.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
 website = "https://github.com/Hattiffnat/SeparateByCollision"
