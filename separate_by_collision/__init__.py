@@ -463,7 +463,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
         self.text_draw_handler = bpy.types.SpaceView3D.draw_handler_add(text_draw, (), "WINDOW", "POST_PIXEL")
         context.area.tag_redraw()
         context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
+        return {"RUNNING_MODAL"}
 
     def _remove_handlers(self):
         bpy.types.SpaceView3D.draw_handler_remove(self.circle_draw_handler, "WINDOW")
