@@ -322,12 +322,12 @@ def island_vs_island(
     island_edges_bvh: dict[Island, BVHNode],
     island_tris_bvh: dict[Island, BVHNode],
 ) -> bool:
-    def get_edges_bvh(isl: Island):
+    def get_edges_bvh(isl: Island) -> BVHNode:
         if isl not in island_edges_bvh:
             island_edges_bvh[isl] = BVHNode([MeshElement(e) for e in isl.edges], radius)
         return island_edges_bvh[isl]
 
-    def get_tris_bvh(isl: Island):
+    def get_tris_bvh(isl: Island) -> BVHNode:
         if isl not in island_tris_bvh:
             island_tris_bvh[isl] = BVHNode([MeshElement(t) for t in isl.tris], radius)
         return island_tris_bvh[isl]
