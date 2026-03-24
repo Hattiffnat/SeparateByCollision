@@ -56,3 +56,4 @@ cython_debug/
 
 __pycache__
 *.blend[0-9]*
+*.blend
