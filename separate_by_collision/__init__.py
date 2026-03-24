@@ -32,8 +32,8 @@ class AABB:
     def __init__(self, points: Iterable[Vector], radius):
         points = tuple(points)
 
-        self.min: Vector = Vector()
-        self.max: Vector = Vector()
+        self.min = Vector()
+        self.max = Vector()
         for axis in range(3):
             self.min[axis] = min(p[axis] for p in points) - radius
             self.max[axis] = max(p[axis] for p in points) + radius
