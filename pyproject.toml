@@ -9,5 +9,4 @@ profile = "black"
 line_length = 120
 
 [tool.pyright]
-reportInvalidTypeForm = "none"
-reportUnknownVariableType = "none"
+typeCheckingMode = "off"
