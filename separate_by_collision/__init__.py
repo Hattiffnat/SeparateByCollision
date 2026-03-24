@@ -600,8 +600,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 collisions_union_find = UnionFindManager(islands.values())
 
                 for isl_1, isl_2 in broad_collisions:
-                    if collisions_union_find.find(isl_1) == collisions_union_find.find(isl_2) or island_vs_island(
-                        obj.data, isl_1, isl_2, self.radius, island_edges_bvh, island_tris_bvh
+                    if (
+                        False
+                        or collisions_union_find.find(isl_1) == collisions_union_find.find(isl_2)
+                        or island_vs_island(obj.data, isl_1, isl_2, self.radius, island_edges_bvh, island_tris_bvh)
                     ):
                         collisions_union_find.union(isl_1, isl_2)
                         collisions.add(frozenset((isl_1, isl_2)))
