@@ -334,6 +334,7 @@ def island_vs_island(
 
     diameter = radius * 2
     diameter_squared = diameter**2
+    rad_vec = Vector.Fill(3, radius)
 
     # VERT VS VERT
     if len(isl_1.vertices) == 1 and len(isl_2.vertices) == 1:
