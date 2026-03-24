@@ -1,11 +1,15 @@
 ADDON_ID=separate_by_collision
-EXTENSIONS_PATH=~/.config/blender/5.0/extensions/user_default
+EXTENSIONS_PATH=~/.config/blender/4.2/extensions/user_default
 ADDON_PATH=$(EXTENSIONS_PATH)/$(ADDON_ID)
 
 RELEASE_FOLDER=extension_release
 RELEASE_PATH=$(RELEASE_FOLDER)/$(ADDON_ID)
 
-TEST_FILE=blend/bench.blend
+# BLENDER = /usr/bin/blender
+BLENDER = ~/BlenderVersions/blender-4.2.0-linux-x64/blender
+
+# TEST_FILE=blend/bench.blend
+TEST_FILE=blend/plane_and_vert.blend
 
 build-extension-archive:
 	rm -rf $(RELEASE_PATH)
@@ -19,7 +23,7 @@ run-in-blender:
 	mkdir -p $(EXTENSIONS_PATH)
 	cp -r $(RELEASE_PATH) $(ADDON_PATH)
 
-	/usr/bin/blender $(TEST_FILE)
+	$(BLENDER) $(TEST_FILE)
 
 fmt:
 	isort .
