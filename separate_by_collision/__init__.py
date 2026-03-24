@@ -455,7 +455,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
     def invoke(self, context: Context, event: Event) -> set[str]:
         self._mouse_co = [0.0, 0.0]
-        r3d = context.space_data.region_3d
 
         def circle_draw():
             origin = view3d_utils.location_3d_to_region_2d(
