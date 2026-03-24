@@ -20,6 +20,9 @@ from mathutils.geometry import (
     intersect_ray_tri,
 )
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s|separate_by_collision:%(lineno)d %(message)s")
+log = logging.getLogger(__name__)
+
 
 @final
 class AABB:
@@ -262,6 +265,7 @@ def leafs(node: BVHNode) -> Iterable[BVHNode]:
 
 
 def bvh_aabb_query(node: BVHNode, aabb: AABB) -> Iterable[BVHNode]:
+    log.debug(f"aabb: {aabb}")
     stack = [node]
 
     while stack:
@@ -342,17 +346,21 @@ def island_vs_island(
     # VERT VS MESH
     if len(isl_1.vertices) == 1:
         vert = mesh.vertices[isl_1.vertices[0]]
+        vert_aabb = AABB([vert.co - rad_vec, vert.co, vert.co + rad_vec], 0)
 
         # VERT VS TRIS
         if isl_2.tris:
-            for node_2 in bvh_aabb_query(get_tris_bvh(isl_2), isl_1.aabb()):
+            log.debug("vert vs tris")
+            for node_2 in bvh_aabb_query(get_tris_bvh(isl_2), vert_aabb):
                 for el in node_2.elements:
                     closest = closest_point_on_tri(vert.co, *(mesh.vertices[v_i].co for v_i in el.element.vertices))
+                    log.debug(f"closest: {closest}")
                     if (vert.co - closest).length_squared <= diameter_squared:
                         return True
 
         # VERT VS EDGES
-        for node_2 in bvh_aabb_query(get_edges_bvh(isl_2), isl_1.aabb()):
+        for node_2 in bvh_aabb_query(get_edges_bvh(isl_2), vert_aabb):
+            log.debug("vert vs edges")
             for el in node_2.elements:
                 e = el.element
                 e_v_1, e_v_2 = (
@@ -377,6 +385,7 @@ def island_vs_island(
     # EDGE VS EDGE
     for node_1, node_2 in bvh_overlap(get_edges_bvh(isl_1), get_edges_bvh(isl_2)):
         for el_1, el_2 in product(node_1.elements, node_2.elements):
+            log.debug("edge vs edge")
             v1_i, v2_i = el_1.element.vertices
             v3_i, v4_i = el_2.element.vertices
 
@@ -394,6 +403,7 @@ def island_vs_island(
     for node_1, node_2 in bvh_overlap(get_tris_bvh(isl_1), get_tris_bvh(isl_2)):
         for el_1, el_2 in product(node_1.elements, node_2.elements):
             for t_1, t_2 in permutations((el_1.element, el_2.element)):
+                log.debug("tri vs tri")
                 # Intersection test
                 t_co = [mesh.vertices[v2_i].co for v2_i in t_2.vertices]
                 for e in combinations(t_1.vertices, 2):
@@ -503,10 +513,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
     def execute(self, context: Context) -> set[str]:
         start = time.perf_counter()
 
-        print(f"radius: {self.radius:.5}\tmode: {self.mode}")
+        log.info(f"radius: {self.radius:.5}\tmode: {self.mode}")
 
         for obj in context.selected_objects:
-            print(obj.name)
+            log.info(obj.name)
             if obj.type != "MESH":
                 continue
 
@@ -521,10 +531,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 islands[r_i] = Island(obj.data, self.radius)
                 islands[r_i].vertices.extend(verts_indices)
 
-            print("islands:", len(islands))
+            log.info(f"islands: {len(islands)}")
 
             # BROAD PHASE
-            print("# BROAD PHASE")
+            log.info("# BROAD PHASE")
 
             islands_bvh = BVHNode([MeshElement(isl) for isl in islands.values()], self.radius)
 
@@ -549,7 +559,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                             )
                         )
 
-            print("broad phase collisions:", len(broad_collisions))
+            log.info(f"broad phase collisions: {len(broad_collisions)}")
 
             #######
             # bvh_bm = bmesh.new()
@@ -573,7 +583,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                     collisions_union_find.union(isl_1, isl_2)
             else:
                 # NARROW PHASE
-                print("# NARROW PHASE")
+                log.info("# NARROW PHASE")
 
                 for e in obj.data.edges:
                     r = verts_union_find.find(e.vertices[0])
@@ -596,10 +606,10 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                         collisions_union_find.union(isl_1, isl_2)
                         collisions.add(frozenset((isl_1, isl_2)))
 
-                print("narrow phase collisions:", len(collisions))
+                log.info(f"narrow phase collisions: {len(collisions)}")
 
             groups = collisions_union_find.groups()
-            print("collision groups:", len(groups))
+            log.info(f"collision groups: {len(groups)}")
 
             if len(groups) < 2:
                 continue
@@ -638,7 +648,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             bm.to_mesh(obj.data)
             bm.free()
 
-        print(f"finished in: {time.perf_counter() - start:.4} sec")
+        log.info(f"finished in: {time.perf_counter() - start:.4} sec")
         return {"FINISHED"}
 
 
@@ -671,7 +681,7 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-        print(cls.__name__, 'registred')
+        log.debug(f"{cls.__name__} registred")
 
     bpy.types.VIEW3D_MT_object_context_menu.prepend(separate_by_collision_menu)
     bpy.types.VIEW3D_MT_view.append(separate_by_collision_menu)
@@ -683,4 +693,4 @@ def unregister():
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
-        print(cls.__name__, "unregistred")
+        log.debug(cls.__name__, "unregistred")
