@@ -562,6 +562,7 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
             log.info(f"broad phase collisions: {len(broad_collisions)}")
 
+            # DEBUG
             #######
             # bvh_bm = bmesh.new()
 
