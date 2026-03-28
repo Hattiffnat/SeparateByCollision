@@ -9,9 +9,9 @@ from typing import Generic, Self, TypeVar, final
 import blf
 import bmesh
 import bpy
-from bmesh.types import BMesh
+from bmesh.types import BMesh, BMVert
 from bpy.props import EnumProperty, FloatProperty
-from bpy.types import Context, Event, Menu, Mesh, MeshEdge, MeshLoopTriangle, MeshPolygon
+from bpy.types import Context, Event, Menu, Mesh, MeshEdge, MeshLoopTriangle, MeshPolygon, Object
 from bpy_extras import view3d_utils
 from gpu_extras.presets import draw_circle_2d
 from mathutils import Vector
@@ -23,6 +23,11 @@ from mathutils.geometry import (
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s|separate_by_collision:%(lineno)d %(message)s")
 log = logging.getLogger(__name__)
+
+ELEMENTS = ("verts", "edges", "loops", "faces")
+VAL_TYPES = frozenset(
+    ("float", "shape", "skin", "deform", "color", "string", "int", "uv", "float_color", "bool", "float_vector")
+)
 
 
 @final
@@ -429,6 +434,109 @@ def island_vs_island(
     return False
 
 
+def copy_bmesh_geom(
+    source_bm: BMesh,
+    dist_bm: BMesh,
+    vert_indices: Iterable[int],
+    edge_indices: Iterable[int],
+    face_indices: Iterable[int],
+) -> dict[BMVert, BMVert]:
+    vert_map: dict[BMVert, BMVert] = {}
+
+    def get_vert(s_v):
+        if s_v not in vert_map:
+            vert_map[s_v] = dist_bm.verts.new(s_v.co, v)
+        return vert_map[s_v]
+
+    # --- create layers ---
+
+    for elem in ELEMENTS:
+        for value_type in VAL_TYPES:
+            lays = getattr(getattr(source_bm, elem).layers, value_type, None)
+            if lays is None:
+                continue
+
+            for layer in lays:
+                getattr(getattr(dist_bm, elem).layers, value_type).new(layer.name)
+
+    # --- copy geometry ---
+
+    # verts
+    for nv_i in vert_indices:
+        v: BMVert = source_bm.verts[nv_i]
+
+        nv: BMVert = dist_bm.verts.new(v.co, v)
+        vert_map[v] = nv
+
+    # edges
+    for e_i in edge_indices:
+        e = source_bm.edges[e_i]
+        _ = dist_bm.edges.new((get_vert(e.verts[0]), get_vert(e.verts[1])), e)
+
+    # faces
+    for f_i in face_indices:
+        f = source_bm.faces[f_i]
+        nf = dist_bm.faces.new([vert_map[v] for v in f.verts], f)
+
+        # copy loop data
+        for l_src, l_dst in zip(f.loops, nf.loops):
+            for layer in source_bm.loops.layers.uv:
+                dst_layer = dist_bm.loops.layers.uv.get(layer.name)
+                l_dst[dst_layer].uv = l_src[layer].uv
+
+            for value_type in ("color", "int", "float", "float_vector", "float_color", "bool"):
+                lays = getattr(source_bm.loops.layers, value_type, None)
+                if lays is None:
+                    continue
+
+                for layer in lays:
+                    dst_layer = getattr(dist_bm.loops.layers, value_type).get(layer.name)
+                    l_dst[dst_layer] = l_src[layer]
+
+    return vert_map
+
+
+def copy_shape_keys(mesh_1: Mesh, dst_obj: Object, vert_index_map: dict[int, int]):
+    """
+    Unfortunately, bmesh.ops.separate and bmesh.ops.duplicate currently cannot
+    extract elements to another bmesh.
+    """
+    if mesh_1.shape_keys is None:
+        return
+
+    mesh_2 = dst_obj.data
+
+    for shape_key in mesh_1.shape_keys.key_blocks:
+        new_shape_key = dst_obj.shape_key_add(name=shape_key.name, from_mix=False)
+        for nv_i, _ in enumerate(mesh_2.vertices):
+            v_i = vert_index_map[nv_i]
+            new_shape_key.points[nv_i].co = shape_key.points[v_i].co
+
+        new_shape_key.mute = shape_key.mute
+        new_shape_key.lock_shape = shape_key.lock_shape
+
+        new_shape_key.value = shape_key.value
+        new_shape_key.slider_min = shape_key.slider_min
+        new_shape_key.slider_max = shape_key.slider_max
+        new_shape_key.vertex_group = shape_key.vertex_group
+        new_shape_key.relative_key = shape_key.relative_key
+
+        new_shape_key.interpolation = shape_key.interpolation
+
+    mesh_2.shape_keys.use_relative = mesh_1.shape_keys.use_relative
+
+
+def copy_vertex_groups(source_obj: Object, dst_obj: Object, vert_index_map: dict[int, int]):
+    for group in source_obj.vertex_groups:
+        new_group = dst_obj.vertex_groups.new(name=group.name)
+        for nv_i, _ in enumerate(dst_obj.data.vertices):
+            v_i = vert_index_map[nv_i]
+            nv = dst_obj.data.vertices[nv_i]
+            if nv.groups.find(group.name) >= 0:
+                weight = group.weight(v_i)
+                new_group.add([nv_i], weight, "REPLACE")
+
+
 @final
 class SeparateByCollisionOperator(bpy.types.Operator):
     """Separate mesh by loose parts. Parts will be grouped if they collide"""
@@ -532,6 +640,14 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 islands[r_i] = Island(obj.data, self.radius)
                 islands[r_i].vertices.extend(verts_indices)
 
+            for e in obj.data.edges:
+                r = verts_union_find.find(e.vertices[0])
+                islands[r].edges.append(e)
+
+            for f in obj.data.polygons:
+                r = verts_union_find.find(f.vertices[0])
+                islands[r].faces.append(f)
+
             log.info(f"islands: {len(islands)}")
 
             # BROAD PHASE
@@ -572,10 +688,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 # NARROW PHASE
                 log.info("# NARROW PHASE")
 
-                for e in obj.data.edges:
-                    r = verts_union_find.find(e.vertices[0])
-                    islands[r].edges.append(e)
-
                 for t in obj.data.loop_triangles:
                     r = verts_union_find.find(t.vertices[0])
                     islands[r].tris.append(t)
@@ -583,17 +695,23 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 island_edges_bvh = {}
                 island_tris_bvh = {}
 
-                collisions = set()
+                collisions: set[frozenset[Island]] = set()
                 collisions_union_find = UnionFindManager(islands.values())
 
-                for isl_1, isl_2 in broad_collisions:
-                    if (
-                        False
-                        or collisions_union_find.find(isl_1) == collisions_union_find.find(isl_2)
-                        or island_vs_island(obj.data, isl_1, isl_2, self.radius, island_edges_bvh, island_tris_bvh)
-                    ):
+                for i, coll in enumerate(broad_collisions):
+                    isl_1, isl_2 = coll
+                    if collisions_union_find.find(isl_1) == collisions_union_find.find(isl_2):
+                        collisions.add(coll)
+                        continue
+
+                    if island_vs_island(obj.data, isl_1, isl_2, self.radius, island_edges_bvh, island_tris_bvh):
                         collisions_union_find.union(isl_1, isl_2)
-                        collisions.add(frozenset((isl_1, isl_2)))
+                        collisions.add(coll)
+
+                    progress_ratio = i / len(broad_collisions)
+                    progress_ratio_int = int(progress_ratio * 100)
+                    if progress_ratio % 3 == 0.0:
+                        log.info(f"{'#' * progress_ratio_int}| {progress_ratio * 100:.2f}%")
 
                 log.info(f"narrow phase collisions: {len(collisions)}")
 
@@ -603,41 +721,78 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             if len(groups) < 2:
                 continue
 
-            # Unfortunately, bmesh.ops.separate and bmesh.ops.duplicate currently cannot
-            # extract elements to another bmesh. However, separation method below is
-            # guaranteed to preserve all attributes, vertex color, vertex groups, etc.
-            # TODO: come up with something faster
+            # SEPARATION
+            log.info("# SEPARATION")
 
-            bm = bmesh.new()
+            bm: BMesh = bmesh.new()
             bm.from_mesh(obj.data)
             bm.verts.ensure_lookup_table()
+            bm.edges.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
 
-            verts_to_delete = set()
+            verts_to_delete: set[int] = set()
 
             groups_iter = iter(groups.values())
             next(groups_iter)
             for group in groups_iter:
-                mesh = obj.data.copy()
-                group_bm = bmesh.new()
-                group_bm.from_mesh(mesh)
+                group_bm: BMesh = bmesh.new(use_operators=False)
 
-                group_verts = frozenset(chain(*(isl.vertices for isl in group)))
+                verts_to_delete.update(chain.from_iterable(isl.vertices for isl in group))
 
-                bmesh.ops.delete(group_bm, geom=[v for v in group_bm.verts if v.index not in group_verts])
-                verts_to_delete.update(group_verts)
+                vert_map = copy_bmesh_geom(
+                    bm,
+                    group_bm,
+                    chain.from_iterable(isl.vertices for isl in group),
+                    (e.index for e in chain.from_iterable(isl.edges for isl in group)),
+                    (f.index for f in chain.from_iterable(isl.faces for isl in group)),
+                )
 
-                group_obj = obj.copy()
-                group_obj.data = mesh
-                group_bm.to_mesh(mesh)
+                # --- create vert index map ---
+
+                group_bm.verts.index_update()
+                verts_index_map_rv = {nv.index: v.index for v, nv in vert_map.items()}
+
+                # --- create new mesh ---
+
+                new_mesh: Mesh = bpy.data.meshes.new(obj.data.name)
+                group_bm.to_mesh(new_mesh)
                 group_bm.free()
 
-                context.collection.objects.link(group_obj)
+                # --- apply materials ---
 
-            bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.index in verts_to_delete])
+                if obj.data.materials is not None:
+                    [new_mesh.materials.append(mat) for mat in obj.data.materials]
+
+                # --- set UV map ---
+
+                for uv_i, uv_layer in enumerate(obj.data.uv_layers):
+                    new_uv_layer = new_mesh.uv_layers[uv_i]
+                    new_uv_layer.active = uv_layer.active
+                    new_uv_layer.active_render = uv_layer.active_render
+                    new_uv_layer.active_clone = uv_layer.active_clone
+
+                # --- set vertex color ---
+
+                for i, vertex_color in enumerate(obj.data.vertex_colors):
+                    new_mesh.vertex_colors[i].active = vertex_color.active
+                    new_mesh.vertex_colors[i].active_render = vertex_color.active_render
+
+                # --- create new object ---
+
+                new_obj = obj.copy()
+                new_obj.data = new_mesh
+
+                copy_shape_keys(obj.data, new_obj, verts_index_map_rv)
+                copy_vertex_groups(obj, new_obj, verts_index_map_rv)
+
+                context.collection.objects.link(new_obj)
+                log.info(f"created {new_obj.name}")
+
+            bmesh.ops.delete(bm, geom=[bm.verts[v_i] for v_i in verts_to_delete])
             bm.to_mesh(obj.data)
             bm.free()
 
-        log.info(f"finished in: {time.perf_counter() - start:.4} sec")
+        log.info(f"finished in: {time.perf_counter() - start:.4f} sec")
         return {"FINISHED"}
 
 
