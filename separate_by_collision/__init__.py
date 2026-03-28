@@ -562,21 +562,6 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
             log.info(f"broad phase collisions: {len(broad_collisions)}")
 
-            # DEBUG
-            #######
-            # bvh_bm = bmesh.new()
-
-            # islands_bvh.visualize(bvh_bm)
-
-            # bvh_mesh = bpy.data.meshes.new("bvh_tree")
-            # bvh_bm.to_mesh(bvh_mesh)
-
-            # bvh_obj = bpy.data.objects.new("bvh_tree", bvh_mesh)
-            # bvh_obj.matrix_local = obj.matrix_local
-            # context.collection.objects.link(bvh_obj)
-            # return
-            #######
-
             if self.mode == "BB":
                 collisions = broad_collisions
                 collisions_union_find = UnionFindManager(islands.values())
