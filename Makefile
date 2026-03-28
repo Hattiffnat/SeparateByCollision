@@ -9,7 +9,9 @@ RELEASE_PATH=$(RELEASE_FOLDER)/$(ADDON_ID)
 BLENDER = ~/BlenderVersions/blender-4.2.0-linux-x64/blender
 
 # TEST_FILE=blend/bench.blend
-TEST_FILE=blend/plane_and_vert.blend
+# TEST_FILE=blend/ultratest_1.blend
+# TEST_FILE=blend/suzanne_cloud.blend
+TEST_FILE=blend/test_42.blend
 
 build-extension-archive:
 	rm -rf $(RELEASE_PATH)
