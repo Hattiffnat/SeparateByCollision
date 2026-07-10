@@ -83,3 +83,7 @@ test_stream
 /.lapce
 /.vscode
 /reference/
+video/
+screenshots/
+errors/
+test_rust_ffi.py
