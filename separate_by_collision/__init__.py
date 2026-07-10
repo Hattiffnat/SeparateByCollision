@@ -21,7 +21,10 @@ from mathutils import Vector
 
 from .py_collisions import Island, MeshEdge, UnionFindManager
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s|separate_by_collision:%(lineno)d %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    # format="%(levelname)s|separate_by_collision:%(lineno)d %(message)s"
+)
 log = logging.getLogger(__name__)
 
 log.debug(__file__)
