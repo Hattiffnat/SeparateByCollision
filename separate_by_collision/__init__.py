@@ -89,11 +89,8 @@ if collisions_backend == "Rust":
     lib_collisions.free_cgroups.restype = None
 
     def cgroups_to_islands(cgroups: CGroups, mesh: Mesh) -> dict[Island, list[Island]]:
-        # log.debug(f"cgroups = {cgroups}")
-
         verts_inds_flat = [cgroups.verts_inds[i] for i in range(cgroups.verts_inds_len)]
         offsets = [cgroups.offsets[i] for i in range(cgroups.offsets_len)]
-        # log.debug(f"verts_inds_flat = {verts_inds_flat}")
         log.debug(f"len(offsets) = {len(offsets)}")
 
         verts_union_find = UnionFindManager(verts_inds_flat)
@@ -102,7 +99,6 @@ if collisions_backend == "Rust":
             right = left + offset
 
             vertices = verts_inds_flat[left:right]
-            # log.debug(f"vert_group: {vertices}")
 
             r = vertices[0]
             for v in vertices:
