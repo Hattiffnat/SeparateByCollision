@@ -452,13 +452,13 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
                 context.collection.objects.link(new_obj)
                 log.info(f"created {new_obj.name}")
+                wm.progress_update(group_i)
+
+            wm.progress_end()
 
             bmesh.ops.delete(bm, geom=[bm.verts[v_i] for v_i in verts_to_delete])
             bm.to_mesh(obj.data)
             bm.free()
-            wm.progress_update(group_i)
-
-        wm.progress_end()
 
         msg = f"finished in: {time.perf_counter() - start:.4f} sec"
         log.info(msg)
