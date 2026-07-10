@@ -14,17 +14,19 @@ import bpy
 import numpy as np
 from bmesh.types import BMesh, BMVert
 from bpy.props import EnumProperty, FloatProperty
-from bpy.types import Context, Event, Menu, Mesh, Object
+from bpy.types import Context, Event, Menu, Mesh, MeshPolygon, Object
 from bpy_extras import view3d_utils
 from gpu_extras.presets import draw_circle_2d
 from mathutils import Vector
 
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s|separate_by_collision:%(lineno)d %(message)s")
+from .py_collisions import Island, MeshEdge, UnionFindManager
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s|separate_by_collision:%(lineno)d %(message)s")
 log = logging.getLogger(__name__)
 
 log.debug(__file__)
 
-# DETECT DLL
+# DETECT NATIVE DLL
 
 system = platform.system()
 collisions_backend = None
@@ -36,9 +38,12 @@ try:
     elif system == "Windows":
         lib_collisions = ctypes.CDLL(Path(__file__).parent / "bin/collisions.dll")
         collisions_backend = "Rust"
+    elif system == "Darwin":
+        lib_collisions = ctypes.CDLL(Path(__file__).parent / "bin/libcollisions.dylib")
+        collisions_backend = "Rust"
     else:
         log.warning(f"⚠️ No collision DLL for your system ({system}). 🐢Python🐢 code will be used instead")
-except (IOError,) as err:
+except (IOError, OSError) as err:
     log.error(err)
     log.error("❗ Unable to load collisions DLL. 🐢Python🐢 code will be used instead")
     collisions_backend = "Python"
@@ -52,14 +57,16 @@ else:
         collisions_backend = "Rust"
 
 
+# collisions_backend = "Python"
+
 if collisions_backend == "Rust":
     log.info("🚀 collisions DLL loaded 🚀")
 
     @final
     class CMesh(ctypes.Structure):
         _fields_ = [
-            ("verts_co", ctypes.POINTER(ctypes.c_float)),
-            ("verts_co_len", ctypes.c_uint32),
+            ("verts", ctypes.POINTER(ctypes.c_float)),
+            ("verts_len", ctypes.c_uint32),
             ("edges", ctypes.POINTER(ctypes.c_uint32)),
             ("edges_len", ctypes.c_uint32),
             ("tris", ctypes.POINTER(ctypes.c_uint32)),
@@ -75,8 +82,52 @@ if collisions_backend == "Rust":
             ("offsets_len", ctypes.c_uint32),
         ]
 
-    lib_collisions.calculate_groups.argtypes = [ctypes.POINTER(CMesh), ctypes.c_float]
+    lib_collisions.calculate_groups.argtypes = [ctypes.POINTER(CMesh), ctypes.c_float, ctypes.c_bool]
     lib_collisions.calculate_groups.restype = CGroups
+
+    lib_collisions.free_cgroups.argtypes = [CGroups]
+    lib_collisions.free_cgroups.restype = None
+
+    def cgroups_to_islands(cgroups: CGroups, mesh: Mesh) -> dict[Island, list[Island]]:
+        # log.debug(f"cgroups = {cgroups}")
+
+        verts_inds_flat = [cgroups.verts_inds[i] for i in range(cgroups.verts_inds_len)]
+        offsets = [cgroups.offsets[i] for i in range(cgroups.offsets_len)]
+        # log.debug(f"verts_inds_flat = {verts_inds_flat}")
+        log.debug(f"len(offsets) = {len(offsets)}")
+
+        verts_union_find = UnionFindManager(verts_inds_flat)
+        left = 0
+        for offset in offsets:
+            right = left + offset
+
+            vertices = verts_inds_flat[left:right]
+            # log.debug(f"vert_group: {vertices}")
+
+            r = vertices[0]
+            for v in vertices:
+                verts_union_find.union(r, v)
+
+            left = right
+
+        islands: dict[int, Island] = {}
+
+        for rv, verts in verts_union_find.groups().items():
+            islands[rv] = Island(mesh, 0)
+            islands[rv].vertices = verts
+
+        for edge in mesh.edges:
+            edge: MeshEdge
+            rv = verts_union_find.find(edge.vertices[0])
+            islands[rv].edges.append(edge)
+
+        for poly in mesh.polygons:
+            poly: MeshPolygon
+            rv = verts_union_find.find(poly.vertices[0])
+            islands[rv].faces.append(poly)
+
+        return {isl: [isl] for isl in islands.values()}
+
 
 ELEMENTS = ("verts", "edges", "loops", "faces")
 VAL_TYPES = frozenset(
@@ -130,7 +181,13 @@ def copy_bmesh_geom(
     # faces
     for f_i in face_indices:
         f = source_bm.faces[f_i]
-        nf = dist_bm.faces.new([vert_map[v] for v in f.verts], f)
+
+        # face_verts = frozenset(vert_map[v] for v in f.verts)
+        face_verts = list(vert_map[v] for v in f.verts)
+        # if len(face_verts) < 3:
+        #     continue
+
+        nf = dist_bm.faces.new(face_verts, f)
 
         # copy loop data
         for l_src, l_dst in zip(f.loops, nf.loops):
@@ -293,6 +350,8 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
             if collisions_backend == "Rust":
                 verts = np.array([v.co for v in obj.data.vertices], dtype=np.float32).flatten()
+                log.debug(f"flat verts len: {len(verts)}")
+
                 edges = np.array([e.vertices for e in obj.data.edges], dtype=np.uint32).flatten()
                 tris = np.array([t.vertices for t in obj.data.loop_triangles], dtype=np.uint32).flatten()
 
@@ -304,14 +363,16 @@ class SeparateByCollisionOperator(bpy.types.Operator):
                 c_mesh.tris = tris.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32))
                 c_mesh.tris_len = len(tris)
 
-                c_groups: CGroups = lib_collisions.calculate_groups(ctypes.byref(c_mesh), self.radius)
+                c_groups: CGroups = lib_collisions.calculate_groups(
+                    ctypes.byref(c_mesh), self.radius, self.mode == "SURFACE"
+                )
 
-                groups = ...  # TODO
+                groups: dict[Island, list[Island]] = cgroups_to_islands(c_groups, obj.data)
 
-                collisions_backend.drop_groups()
+                lib_collisions.free_cgroups(c_groups)
 
             else:
-                groups: dict[py_collisions.Island, list[py_collisions.Island]] = py_collisions.calculate_collisions(
+                groups: dict[Island, list[Island]] = py_collisions.calculate_collisions(
                     obj.data, self.radius, self.mode
                 )
 
@@ -331,9 +392,14 @@ class SeparateByCollisionOperator(bpy.types.Operator):
 
             verts_to_delete: set[int] = set()
 
-            groups_iter = iter(c_groups.values())
+            total_groups = len(groups) - 1
+            wm = context.window_manager
+
+            groups_iter = iter(groups.values())
             next(groups_iter)
-            for group in groups_iter:
+
+            wm.progress_begin(0, total_groups)
+            for group_i, group in enumerate(groups_iter):
                 group_bm: BMesh = bmesh.new(use_operators=False)
 
                 verts_to_delete.update(chain.from_iterable(isl.vertices for isl in group))
@@ -390,6 +456,9 @@ class SeparateByCollisionOperator(bpy.types.Operator):
             bmesh.ops.delete(bm, geom=[bm.verts[v_i] for v_i in verts_to_delete])
             bm.to_mesh(obj.data)
             bm.free()
+            wm.progress_update(group_i)
+
+        wm.progress_end()
 
         msg = f"finished in: {time.perf_counter() - start:.4f} sec"
         log.info(msg)

@@ -1,11 +1,11 @@
 import logging
 from collections import defaultdict
-from collections.abc import Iterable
 from itertools import chain, combinations, permutations, product
-from typing import Generic, Literal, Self, TypeVar, final
+from typing import Generic, Iterable, Literal, Self, TypeVar, final
 
+import bpy
 from bmesh.types import BMesh
-from bpy.types import Mesh, MeshEdge, MeshLoopTriangle, MeshPolygon
+from bpy.types import Mesh, MeshEdge, MeshLoopTriangle, MeshPolygon, WindowManager
 from mathutils import Vector
 from mathutils.geometry import (
     closest_point_on_tri,
@@ -62,7 +62,7 @@ class AABB:
 class Island:
     __slots__ = ("id_data", "vertices", "edges", "faces", "tris", "_aabb", "radius")
 
-    def __init__(self, mesh, radius):
+    def __init__(self, mesh: Mesh, radius: float):
         self.id_data = mesh
         self.radius = radius
 
@@ -343,16 +343,16 @@ def island_vs_island(
         # VERT VS TRIS
         if isl_2.tris:
             for node_2 in bvh_aabb_query(get_tris_bvh(isl_2), vert_aabb):
-                log.debug("vert vs tris")
+                # log.debug("vert vs tris")
                 for el in node_2.elements:
                     closest = closest_point_on_tri(vert.co, *(mesh.vertices[v_i].co for v_i in el.element.vertices))
-                    log.debug(f"closest: {closest}")
+                    # log.debug(f"closest: {closest}")
                     if (vert.co - closest).length_squared <= diameter_squared:
                         return True
 
         # VERT VS EDGES
         for node_2 in bvh_aabb_query(get_edges_bvh(isl_2), vert_aabb):
-            log.debug("vert vs edges")
+            # log.debug("vert vs edges")
             for el in node_2.elements:
                 e = el.element
                 e_v_1, e_v_2 = (
@@ -377,7 +377,7 @@ def island_vs_island(
     # EDGE VS EDGE
     for node_1, node_2 in bvh_overlap(get_edges_bvh(isl_1), get_edges_bvh(isl_2)):
         for el_1, el_2 in product(node_1.elements, node_2.elements):
-            log.debug("edge vs edge")
+            # log.debug("edge vs edge")
             v1_i, v2_i = el_1.element.vertices
             v3_i, v4_i = el_2.element.vertices
 
@@ -395,7 +395,7 @@ def island_vs_island(
     for node_1, node_2 in bvh_overlap(get_tris_bvh(isl_1), get_tris_bvh(isl_2)):
         for el_1, el_2 in product(node_1.elements, node_2.elements):
             for t_1, t_2 in permutations((el_1.element, el_2.element)):
-                log.debug("tri vs tri")
+                # log.debug("tri vs tri")
                 # Intersection test
                 t_co = [mesh.vertices[v2_i].co for v2_i in t_2.vertices]
                 for e in combinations(t_1.vertices, 2):
@@ -489,6 +489,9 @@ def calculate_collisions(mesh: Mesh, radius: float, mode: Literal["BB", "SURFACE
         collisions: set[frozenset[Island]] = set()
         collisions_union_find = UnionFindManager(islands.values())
 
+        wm: WindowManager = bpy.context.window_manager
+
+        wm.progress_begin(0, len(broad_collisions))
         for i, coll in enumerate(broad_collisions):
             isl_1, isl_2 = coll
             if collisions_union_find.find(isl_1) == collisions_union_find.find(isl_2):
@@ -499,10 +502,8 @@ def calculate_collisions(mesh: Mesh, radius: float, mode: Literal["BB", "SURFACE
                 collisions_union_find.union(isl_1, isl_2)
                 collisions.add(coll)
 
-            progress_ratio = i / len(broad_collisions)
-            progress_ratio_int = int(progress_ratio * 100)
-            if progress_ratio % 3 == 0.0:
-                log.info(f"{'#' * progress_ratio_int}| {progress_ratio * 100:.2f}%")
+            wm.progress_update(i)
+        wm.progress_end()
 
         log.info(f"narrow phase collisions: {len(collisions)}")
 
