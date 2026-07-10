@@ -25,7 +25,6 @@ build-bin-release:
 
 
 build-extension-archive-release:
-	make fmt
 	make build-bin-release
 	rm -rf $(RELEASE_PATH)
 	mkdir -p $(RELEASE_PATH)/bin
