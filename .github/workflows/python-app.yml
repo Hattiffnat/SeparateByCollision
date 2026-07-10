@@ -16,6 +16,8 @@ jobs:
 
       - name: Create archive
         run: |
+          rustup target add x86_64-pc-windows-gnu
+          cargo install cargo-zigbuild
           make build-extension-archive-release
 
       - name: Upload release asset
