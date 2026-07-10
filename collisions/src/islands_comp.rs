@@ -22,10 +22,10 @@ pub(crate) fn island_vs_island<'isl, 'map>(
     let max_distance = islands[isl_1_i].radius + islands[isl_2_i].radius;
     let max_distance_sq = max_distance.powi(2);
 
-    // dbg!(&islands[isl_1_i].edges);
-    // dbg!(&islands[isl_1_i].tris);
-    // dbg!(&islands[isl_2_i].edges);
-    // dbg!(&islands[isl_2_i].tris);
+    // dbg!(&islands[isl_1_i].edges.len());
+    // dbg!(&islands[isl_1_i].tris.len());
+    // dbg!(&islands[isl_2_i].edges.len());
+    // dbg!(&islands[isl_2_i].tris.len());
 
     // SINGLE VERT ISLANDS CASE
     if islands[isl_1_i].verts_inds.len() == 1 && islands[isl_2_i].verts_inds.len() == 1 {
