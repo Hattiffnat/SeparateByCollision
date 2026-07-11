@@ -66,11 +66,16 @@ impl<'a> Mesh<'a> {
 
         let mut visited_edges: HashSet<Vector2<usize>> = HashSet::new();
         for t in self.tris_flat.chunks_exact(3) {
-            let tri = Tri::new(self, t[0] as usize, t[1] as usize, t[2] as usize, radius);
+            let mut t = [t[0] as usize, t[1] as usize, t[2] as usize];
+            t.sort();
 
-            visited_edges.insert(Vector2::new(t[0] as usize, t[1] as usize));
-            visited_edges.insert(Vector2::new(t[1] as usize, t[2] as usize));
-            visited_edges.insert(Vector2::new(t[0] as usize, t[2] as usize));
+            let (a, b, c) = (t[0], t[1], t[2]);
+
+            let tri = Tri::new(self, a, b, c, radius);
+
+            visited_edges.insert(Vector2::new(a, b));
+            visited_edges.insert(Vector2::new(b, c));
+            visited_edges.insert(Vector2::new(a, c));
 
             let rv = verts_union_find.find(tri.verts_inds[0]);
 
